@@ -1,0 +1,109 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# =========================
+# Virtual Environment
+# =========================
+.venv/
+venv/
+env/
+.env/
+ENV/
+chroma.db
+notebook/chroma.db/
+notebook/processed/
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# IDE / Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Jupyter Notebook
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# Testing / Coverage
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# =========================
+# Build / Distribution
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# DocuRAG - Uploaded Documents
+# =========================
+
+uploads/
+documents/
+
+# =========================
+# Vector Database / RAG Storage
+# =========================
+chroma/
+chroma_db/
+vectorstore/
+vectordb/
+.faiss/
+
+# =========================
+# Model / Cache Files
+# =========================
+.cache/
+huggingface/
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+# =========================
+# Temporary Files
+# =========================
+tmp/
+temp/
+*.tmp
+*.bak
+
+# =========================
+# Secrets / Credentials
+# =========================
+*.pem
+*.key
+credentials.json
+service-account.json

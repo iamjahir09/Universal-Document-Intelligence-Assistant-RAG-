@@ -1,0 +1,12 @@
+langchain
+langchain-community
+langchain-text-splitters
+langchain-openai
+langchain-chroma
+chromadb
+pypdf
+python-dotenv
+openai
+langchain_google_genai
+os
+rank_bm25

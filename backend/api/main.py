@@ -8,7 +8,7 @@ from fastapi import (
     UploadFile,
     HTTPException
 )
-
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .ingestion import (
@@ -16,7 +16,7 @@ from .ingestion import (
     UPLOAD_DIR
 )
 
-from .retrieval import RAGEngine
+from . import retrieval
 
 
 app = FastAPI(
@@ -25,8 +25,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-
-rag_engine = RAGEngine()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+rag_engine = getattr(retrieval, "RAGEngine")()
 
 chat_histories = {}
 

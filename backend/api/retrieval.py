@@ -1,11 +1,12 @@
 from pathlib import Path
 import os
 import pickle
+import requests
 
 from dotenv import load_dotenv
 
 from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.retrievers import BaseRetriever
@@ -13,18 +14,11 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from langchain_community.retrievers import BM25Retriever
 
-from langchain_classic.retrievers import (
-    EnsembleRetriever,
-    ContextualCompressionRetriever
-)
-
-from langchain_classic.retrievers.document_compressors import (
-    LLMChainExtractor
-)
+from langchain_classic.retrievers import EnsembleRetriever
 
 from sentence_transformers import CrossEncoder
 
-from langchain_groq import ChatGroq
+from huggingface_hub import InferenceClient
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,39 +31,48 @@ CHUNKS_FILE = PROCESSED_DIR / "chunks.pkl"
 
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
-if not GOOGLE_API_KEY:
+if not HF_TOKEN:
     raise ValueError(
-        "GOOGLE_API_KEY not found in .env file"
-    )
-
-if not GROQ_API_KEY:
-    raise ValueError(
-        "GROQ_API_KEY not found in .env file"
+        "HF_TOKEN not found in .env file"
     )
 
 
 def load_retrieval_data():
 
-    embedding = GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
-        # google_api_key=GOOGLE_API_KEY
+    embedding = HuggingFaceEmbeddings(
+        model_name="BAAI/bge-small-en-v1.5",
+        model_kwargs={
+            "device": "cpu"
+        },
+        encode_kwargs={
+            "normalize_embeddings": True
+        }
+    )
+
+    CHROMA_COLLECTION_NAME = os.getenv(
+        "CHROMA_COLLECTION_NAME",
+        "docurag"
     )
 
     vectorstore = Chroma(
-        collection_name="Neural",
+        collection_name=CHROMA_COLLECTION_NAME,
         embedding_function=embedding,
         persist_directory=str(CHROMA_DIR)
     )
 
     if CHUNKS_FILE.exists():
 
-        with open(CHUNKS_FILE, "rb") as file:
+        with open(
+            CHUNKS_FILE,
+            "rb"
+        ) as file:
+
             documents = pickle.load(file)
 
     else:
+
         documents = []
 
     return vectorstore, documents
@@ -182,27 +185,206 @@ def create_reranker_retriever(
     )
 
 
+def get_available_models():
+
+    response = requests.get(
+        "https://router.huggingface.co/v1/models",
+        headers={
+            "Authorization": f"Bearer {HF_TOKEN}"
+        },
+        timeout=20
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    models = data.get(
+        "data",
+        []
+    )
+
+    available_models = []
+
+    for model in models:
+
+        model_id = model.get(
+            "id"
+        )
+
+        architecture = model.get(
+            "architecture",
+            {}
+        )
+
+        input_modalities = architecture.get(
+            "input_modalities",
+            []
+        )
+
+        output_modalities = architecture.get(
+            "output_modalities",
+            []
+        )
+
+        providers = model.get(
+            "providers",
+            []
+        )
+
+        live_providers = [
+            provider
+            for provider in providers
+            if provider.get("status") == "live"
+        ]
+
+        if not model_id:
+            continue
+
+        if "text" not in input_modalities:
+            continue
+
+        if "text" not in output_modalities:
+            continue
+
+        if not live_providers:
+            continue
+
+        best_provider = max(
+            live_providers,
+            key=lambda provider: (
+                provider.get(
+                    "throughput",
+                    0
+                )
+            )
+        )
+
+        available_models.append(
+            {
+                "id": model_id,
+                "provider": best_provider.get(
+                    "provider"
+                ),
+                "throughput": best_provider.get(
+                    "throughput",
+                    0
+                ),
+                "context_length": best_provider.get(
+                    "context_length",
+                    0
+                )
+            }
+        )
+
+    available_models.sort(
+        key=lambda model: (
+            model["throughput"],
+            model["context_length"]
+        ),
+        reverse=True
+    )
+
+    return available_models
+
+
 def create_llm():
 
-    return ChatGroq(
-        model="Qwen/Qwen3.6-27B",
-        # groq_api_key=GROQ_API_KEY,
-        temperature=0
+    models = get_available_models()
+
+    if not models:
+
+        raise RuntimeError(
+            "No live Hugging Face text-to-text "
+            "models are currently available."
+        )
+
+    client = InferenceClient(
+        token=HF_TOKEN,
+        provider="auto"
     )
 
+    return {
+        "client": client,
+        "models": models
+    }
 
-def create_compression_retriever(
-    reranker_retriever,
-    llm
+
+def call_llm(
+    llm,
+    messages
 ):
 
-    compressor = LLMChainExtractor.from_llm(
-        llm
-    )
+    client = llm["client"]
+    models = llm["models"]
 
-    return ContextualCompressionRetriever(
-        base_compressor=compressor,
-        base_retriever=reranker_retriever
+    last_error = None
+
+    for model in models:
+
+        try:
+
+            response = (
+                client.chat.completions.create(
+                    model=model["id"],
+                    messages=messages,
+                    max_tokens=512,
+                    temperature=0
+                )
+            )
+
+            content = (
+                response
+                .choices[0]
+                .message
+                .content
+            )
+
+            if content:
+
+                return content.strip()
+
+        except Exception as error:
+
+            last_error = error
+
+            continue
+
+    fresh_models = get_available_models()
+
+    for model in fresh_models:
+
+        try:
+
+            response = (
+                client.chat.completions.create(
+                    model=model["id"],
+                    messages=messages,
+                    max_tokens=512,
+                    temperature=0
+                )
+            )
+
+            content = (
+                response
+                .choices[0]
+                .message
+                .content
+            )
+
+            if content:
+
+                return content.strip()
+
+        except Exception as error:
+
+            last_error = error
+
+            continue
+
+    raise RuntimeError(
+        "All available Hugging Face models failed. "
+        f"Last error: {last_error}"
     )
 
 
@@ -278,11 +460,17 @@ def rewrite_question(
         }
     )
 
-    response = llm.invoke(
-        formatted_prompt
-    )
+    messages = [
+        {
+            "role": "user",
+            "content": formatted_prompt.to_string()
+        }
+    ]
 
-    return response.content.strip()
+    return call_llm(
+        llm,
+        messages
+    )
 
 
 def create_context(documents):
@@ -296,6 +484,7 @@ def create_context(documents):
 def extract_sources(documents):
 
     sources = []
+    seen = set()
 
     for document in documents:
 
@@ -303,8 +492,50 @@ def extract_sources(documents):
             "source"
         )
 
-        if source and source not in sources:
-            sources.append(source)
+        if not source:
+            continue
+
+        filename = Path(
+            source
+        ).name
+
+        if len(filename) > 33:
+
+            prefix = filename[:32]
+
+            if (
+                all(
+                    character in "0123456789abcdef"
+                    for character in prefix.lower()
+                )
+                and filename[32] == "_"
+            ):
+
+                filename = filename[33:]
+
+        page = document.metadata.get(
+            "page"
+        )
+
+        if page is not None:
+
+            source_label = (
+                f"{filename} — Page {int(page) + 1}"
+            )
+
+        else:
+
+            source_label = filename
+
+        if source_label not in seen:
+
+            seen.add(
+                source_label
+            )
+
+            sources.append(
+                source_label
+            )
 
     return sources
 
@@ -350,11 +581,17 @@ def generate_answer(
         }
     )
 
-    response = llm.invoke(
-        formatted_prompt
-    )
+    messages = [
+        {
+            "role": "user",
+            "content": formatted_prompt.to_string()
+        }
+    ]
 
-    return response.content.strip()
+    return call_llm(
+        llm,
+        messages
+    )
 
 
 class RAGEngine:
@@ -380,13 +617,6 @@ class RAGEngine:
 
         self.llm = create_llm()
 
-        self.compression_retriever = (
-            create_compression_retriever(
-                self.reranker_retriever,
-                self.llm
-            )
-        )
-
     def refresh(self):
 
         self.vectorstore, self.documents = (
@@ -406,13 +636,6 @@ class RAGEngine:
             )
         )
 
-        self.compression_retriever = (
-            create_compression_retriever(
-                self.reranker_retriever,
-                self.llm
-            )
-        )
-
     def ask(
         self,
         query,
@@ -426,7 +649,7 @@ class RAGEngine:
         )
 
         documents = (
-            self.compression_retriever
+            self.reranker_retriever
             .invoke(standalone_query)
         )
 

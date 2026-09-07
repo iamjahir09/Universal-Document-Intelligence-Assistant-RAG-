@@ -15,7 +15,7 @@ from langchain_community.document_loaders import (
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
-
+from langchain_huggingface import HuggingFaceEmbeddings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -140,25 +140,31 @@ def save_chunks(chunks):
 
     return new_chunks
 
-
 def get_vectorstore():
     """
     Create or load the persistent Chroma vector store.
     """
 
-    embedding = GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
-        # google_api_key=GOOGLE_API_KEY
+    embedding = HuggingFaceEmbeddings(
+        model_name="BAAI/bge-small-en-v1.5",
+        model_kwargs={
+            "device": "cpu"
+        },
+        encode_kwargs={
+            "normalize_embeddings": True
+        }
     )
-
+    CHROMA_COLLECTION_NAME = os.getenv(
+        "CHROMA_COLLECTION_NAME",
+        "docurag"
+    )
     vectorstore = Chroma(
-        collection_name="Neural",
+        collection_name=CHROMA_COLLECTION_NAME,
         embedding_function=embedding,
         persist_directory=str(CHROMA_DIR)
     )
 
     return vectorstore
-
 
 def add_chunks_to_vectorstore(chunks):
     """

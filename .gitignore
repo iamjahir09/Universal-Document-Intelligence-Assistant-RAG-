@@ -15,7 +15,7 @@ env/
 .env/
 ENV/
 chroma.db
-notebook/chroma.db/
+notebook/chromadb/
 notebook/processed/
 
 # =========================
@@ -70,7 +70,7 @@ desktop.ini
 # DocuRAG - Uploaded Documents
 # =========================
 
-uploads/
+
 documents/
 
 # =========================

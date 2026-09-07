@@ -17,7 +17,6 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 UPLOAD_DIR = BASE_DIR / "notebook" / "data" / "uploads"
@@ -142,7 +141,6 @@ def save_chunks(chunks):
     return new_chunks
 
 
-
 def get_vectorstore():
     """
     Create or load the persistent Chroma vector store.
@@ -201,6 +199,7 @@ def add_chunks_to_vectorstore(chunks):
         )
 
     return vectorstore
+
 
 def ingest_file(file_path: Path):
     """

@@ -11,12 +11,13 @@ from fastapi import (
 
 from pydantic import BaseModel
 
-from api.ingestion import (
+from .ingestion import (
     ingest_file,
     UPLOAD_DIR
 )
 
-from api.retrieval import RAGEngine
+from .retrieval import RAGEngine
+
 
 app = FastAPI(
     title="DocuRAG API",
@@ -35,6 +36,7 @@ class ChatRequest(BaseModel):
     query: str
     session_id: str = "default"
 
+
 @app.get("/")
 def root():
 
@@ -49,6 +51,7 @@ def health():
     return {
         "status": "healthy"
     }
+
 
 @app.post("/upload")
 def upload_file(

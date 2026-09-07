@@ -51,7 +51,6 @@ if not GROQ_API_KEY:
     )
 
 
-
 def load_retrieval_data():
 
     embedding = GoogleGenerativeAIEmbeddings(
@@ -74,7 +73,6 @@ def load_retrieval_data():
         documents = []
 
     return vectorstore, documents
-
 
 
 def create_hybrid_retriever(
@@ -115,7 +113,6 @@ def create_hybrid_retriever(
         return hybrid_retriever
 
     return semantic_retriever
-
 
 
 class RerankerRetriever(BaseRetriever):
@@ -183,6 +180,7 @@ def create_reranker_retriever(
         top_k=3,
         threshold=0
     )
+
 
 def create_llm():
 
@@ -357,7 +355,6 @@ def generate_answer(
     )
 
     return response.content.strip()
-
 
 
 class RAGEngine:

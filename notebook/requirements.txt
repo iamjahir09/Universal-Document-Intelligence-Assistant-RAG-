@@ -10,3 +10,4 @@ openai
 langchain_google_genai
 os
 rank_bm25
+sentence-transformers

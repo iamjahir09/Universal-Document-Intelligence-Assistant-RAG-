@@ -17,6 +17,8 @@ ENV/
 chroma.db
 notebook/chromadb/
 notebook/processed/
+notebook/data/uploads/
+uploads/
 
 # =========================
 # Environment Variables

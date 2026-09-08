@@ -8,7 +8,11 @@ from fastapi import (
     UploadFile,
     HTTPException
 )
-from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi.middleware.cors import (
+    CORSMiddleware
+)
+
 from pydantic import BaseModel
 
 from .ingestion import (
@@ -16,7 +20,7 @@ from .ingestion import (
     UPLOAD_DIR
 )
 
-from . import retrieval
+from .retrieval import RAGEngine
 
 
 app = FastAPI(
@@ -24,6 +28,7 @@ app = FastAPI(
     description="Universal Document RAG Assistant API",
     version="1.0.0"
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,7 +40,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-rag_engine = getattr(retrieval, "RAGEngine")()
+
+
+rag_engine = RAGEngine()
 
 chat_histories = {}
 
@@ -75,6 +82,7 @@ def upload_file(
     }
 
     if not file.filename:
+
         raise HTTPException(
             status_code=400,
             detail="Filename is required."
@@ -90,7 +98,7 @@ def upload_file(
             status_code=400,
             detail=(
                 f"Unsupported file type: {extension}. "
-                f"Allowed types: PDF, TXT, CSV, DOCX."
+                "Allowed types: PDF, TXT, CSV, DOCX."
             )
         )
 
@@ -103,7 +111,8 @@ def upload_file(
     )
 
     file_path = (
-        UPLOAD_DIR / stored_filename
+        UPLOAD_DIR /
+        stored_filename
     )
 
     try:
@@ -122,18 +131,19 @@ def upload_file(
             file_path
         )
 
-        # Refresh retrieval so newly uploaded
-        # documents become available to BM25.
         rag_engine.refresh()
 
         return {
-            "message": (
-                "File uploaded and indexed successfully."
-            ),
-            "filename": safe_filename,
-            "documents": result["documents"],
-            "chunks": result["chunks"],
-            "new_chunks": result["new_chunks"]
+            "message":
+                "File uploaded and indexed successfully.",
+            "filename":
+                safe_filename,
+            "documents":
+                result["documents"],
+            "chunks":
+                result["chunks"],
+            "new_chunks":
+                result["new_chunks"]
         }
 
     except ValueError as error:
@@ -162,7 +172,9 @@ def upload_file(
 
 
 @app.post("/chat")
-def chat(request: ChatRequest):
+def chat(
+    request: ChatRequest
+):
 
     query = request.query.strip()
 
@@ -176,28 +188,43 @@ def chat(request: ChatRequest):
     session_id = request.session_id
 
     if session_id not in chat_histories:
-        chat_histories[session_id] = []
+
+        chat_histories[
+            session_id
+        ] = []
 
     try:
 
         result = rag_engine.ask(
             query=query,
-            chat_history=chat_histories[session_id]
+            chat_history=(
+                chat_histories[
+                    session_id
+                ]
+            )
         )
 
         return {
-            "session_id": session_id,
-            "query": query,
-            "standalone_query": (
-                result["standalone_query"]
-            ),
-            "answer": result["answer"],
-            "sources": result["sources"]
+            "session_id":
+                session_id,
+            "query":
+                query,
+            "standalone_query":
+                result[
+                    "standalone_query"
+                ],
+            "answer":
+                result["answer"],
+            "sources":
+                result["sources"]
         }
 
     except Exception as error:
 
         raise HTTPException(
             status_code=500,
-            detail=f"RAG pipeline failed: {str(error)}"
+            detail=(
+                "RAG pipeline failed: "
+                f"{str(error)}"
+            )
         )

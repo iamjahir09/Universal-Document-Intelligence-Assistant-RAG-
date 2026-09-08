@@ -8,12 +8,10 @@ from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.messages import HumanMessage, AIMessage
 
 from langchain_community.retrievers import BM25Retriever
-
 from langchain_classic.retrievers import EnsembleRetriever
 
 from sentence_transformers import CrossEncoder
@@ -31,11 +29,81 @@ CHUNKS_FILE = PROCESSED_DIR / "chunks.pkl"
 
 load_dotenv()
 
-HF_TOKEN = os.getenv("HF_TOKEN")
+HF_TOKEN = os.getenv(
+    "HF_TOKEN"
+)
 
 if not HF_TOKEN:
     raise ValueError(
         "HF_TOKEN not found in .env file"
+    )
+
+
+GENERAL_MESSAGES = {
+    "hi",
+    "hello",
+    "hey",
+    "thanks",
+    "thank you",
+    "thx",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "how are you",
+    "how are you?",
+    "what's up",
+    "whats up"
+}
+
+
+GENERAL_RESPONSES = {
+    "hi": "Hello! How can I help you?",
+    "hello": "Hello! How can I help you?",
+    "hey": "Hey! How can I help you?",
+    "thanks": "You're welcome!",
+    "thank you": "You're welcome!",
+    "ok thankyou" : "You're welcome !",
+    "thx": "You're welcome!",
+    "good morning": "Good morning! How can I help you?",
+    "good afternoon": "Good afternoon! How can I help you?",
+    "good evening": "Good evening! How can I help you?",
+    "how are you": "I'm doing well! How can I help you?",
+    "how are you?": "I'm doing well! How can I help you?",
+    "what's up": "I'm here and ready to help!",
+    "whats up": "I'm here and ready to help!"
+}
+
+
+def is_general_conversation(
+    query
+):
+
+    normalized = (
+        query
+        .strip()
+        .lower()
+        .replace("!", "")
+        .replace(".", "")
+    )
+
+    return normalized in GENERAL_MESSAGES
+
+
+def get_general_response(
+    query
+):
+
+    normalized = (
+        query
+        .strip()
+        .lower()
+        .replace("!", "")
+        .replace(".", "")
+    )
+
+    return GENERAL_RESPONSES.get(
+        normalized,
+        "Hello! How can I help you?"
     )
 
 
@@ -51,25 +119,35 @@ def load_retrieval_data():
         }
     )
 
-    CHROMA_COLLECTION_NAME = os.getenv(
+    collection_name = os.getenv(
         "CHROMA_COLLECTION_NAME",
         "docurag"
     )
 
     vectorstore = Chroma(
-        collection_name=CHROMA_COLLECTION_NAME,
+        collection_name=collection_name,
         embedding_function=embedding,
-        persist_directory=str(CHROMA_DIR)
+        persist_directory=str(
+            CHROMA_DIR
+        )
     )
 
     if CHUNKS_FILE.exists():
 
-        with open(
-            CHUNKS_FILE,
-            "rb"
-        ) as file:
+        try:
 
-            documents = pickle.load(file)
+            with open(
+                CHUNKS_FILE,
+                "rb"
+            ) as file:
+
+                documents = pickle.load(
+                    file
+                )
+
+        except Exception:
+
+            documents = []
 
     else:
 
@@ -83,47 +161,53 @@ def create_hybrid_retriever(
     documents
 ):
 
-    semantic_retriever = vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={
-            "k": 3,
-            "fetch_k": 10
-        }
+    if not documents:
+
+        return vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": 5,
+                "fetch_k": 20
+            }
+        )
+
+    semantic_retriever = (
+        vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": 5,
+                "fetch_k": 20
+            }
+        )
     )
 
-    if documents:
-
-        keyword_retriever = (
-            BM25Retriever
-            .from_documents(
-                documents=documents
-            )
+    keyword_retriever = (
+        BM25Retriever.from_documents(
+            documents=documents
         )
+    )
 
-        keyword_retriever.k = 3
+    keyword_retriever.k = 5
 
-        hybrid_retriever = EnsembleRetriever(
-            retrievers=[
-                semantic_retriever,
-                keyword_retriever
-            ],
-            weights=[
-                0.7,
-                0.3
-            ]
-        )
-
-        return hybrid_retriever
-
-    return semantic_retriever
+    return EnsembleRetriever(
+        retrievers=[
+            semantic_retriever,
+            keyword_retriever
+        ],
+        weights=[
+            0.7,
+            0.3
+        ]
+    )
 
 
-class RerankerRetriever(BaseRetriever):
+class RerankerRetriever(
+    BaseRetriever
+):
 
     base_retriever: BaseRetriever
     reranker: CrossEncoder
     top_k: int = 3
-    threshold: float = 0
 
     def _get_relevant_documents(
         self,
@@ -132,8 +216,10 @@ class RerankerRetriever(BaseRetriever):
         run_manager=None
     ):
 
-        candidates = self.base_retriever.invoke(
-            query
+        candidates = (
+            self.base_retriever.invoke(
+                query
+            )
         )
 
         if not candidates:
@@ -152,20 +238,20 @@ class RerankerRetriever(BaseRetriever):
         )
 
         ranked_results = sorted(
-            zip(scores, candidates),
-            key=lambda x: x[0],
+            zip(
+                scores,
+                candidates
+            ),
+            key=lambda item: item[0],
             reverse=True
         )
-
-        best_score = ranked_results[0][0]
-
-        if best_score < self.threshold:
-            return []
 
         return [
             document
             for score, document
-            in ranked_results[:self.top_k]
+            in ranked_results[
+                :self.top_k
+            ]
         ]
 
 
@@ -180,8 +266,7 @@ def create_reranker_retriever(
     return RerankerRetriever(
         base_retriever=hybrid_retriever,
         reranker=reranker,
-        top_k=3,
-        threshold=0
+        top_k=3
     )
 
 
@@ -190,7 +275,8 @@ def get_available_models():
     response = requests.get(
         "https://router.huggingface.co/v1/models",
         headers={
-            "Authorization": f"Bearer {HF_TOKEN}"
+            "Authorization":
+                f"Bearer {HF_TOKEN}"
         },
         timeout=20
     )
@@ -217,14 +303,18 @@ def get_available_models():
             {}
         )
 
-        input_modalities = architecture.get(
-            "input_modalities",
-            []
+        input_modalities = (
+            architecture.get(
+                "input_modalities",
+                []
+            )
         )
 
-        output_modalities = architecture.get(
-            "output_modalities",
-            []
+        output_modalities = (
+            architecture.get(
+                "output_modalities",
+                []
+            )
         )
 
         providers = model.get(
@@ -235,7 +325,9 @@ def get_available_models():
         live_providers = [
             provider
             for provider in providers
-            if provider.get("status") == "live"
+            if provider.get(
+                "status"
+            ) == "live"
         ]
 
         if not model_id:
@@ -263,17 +355,20 @@ def get_available_models():
         available_models.append(
             {
                 "id": model_id,
-                "provider": best_provider.get(
-                    "provider"
-                ),
-                "throughput": best_provider.get(
-                    "throughput",
-                    0
-                ),
-                "context_length": best_provider.get(
-                    "context_length",
-                    0
-                )
+                "provider":
+                    best_provider.get(
+                        "provider"
+                    ),
+                "throughput":
+                    best_provider.get(
+                        "throughput",
+                        0
+                    ),
+                "context_length":
+                    best_provider.get(
+                        "context_length",
+                        0
+                    )
             }
         )
 
@@ -347,10 +442,11 @@ def call_llm(
         except Exception as error:
 
             last_error = error
-
             continue
 
-    fresh_models = get_available_models()
+    fresh_models = (
+        get_available_models()
+    )
 
     for model in fresh_models:
 
@@ -379,7 +475,6 @@ def call_llm(
         except Exception as error:
 
             last_error = error
-
             continue
 
     raise RuntimeError(
@@ -388,35 +483,9 @@ def call_llm(
     )
 
 
-rewrite_prompt = ChatPromptTemplate.from_template(
-    """
-You are a question rewriting assistant for a
-document RAG system.
-
-Your task is to rewrite the user's current question
-into a standalone question using the conversation history.
-
-Rules:
-
-1. Preserve the original meaning of the question.
-2. Resolve references such as "it", "this", "they", "that".
-3. If the current question is already standalone,
-   return it unchanged.
-4. Return ONLY the rewritten question.
-5. Do not answer the question.
-
-Conversation History:
-{chat_history}
-
-Current Question:
-{question}
-
-Standalone Question:
-"""
-)
-
-
-def format_chat_history(chat_history):
+def format_chat_history(
+    chat_history
+):
 
     history = []
 
@@ -440,7 +509,9 @@ def format_chat_history(chat_history):
                 f"Assistant: {message.content}"
             )
 
-    return "\n".join(history)
+    return "\n".join(
+        history
+    )
 
 
 def rewrite_question(
@@ -449,31 +520,59 @@ def rewrite_question(
     llm
 ):
 
-    history_text = format_chat_history(
-        chat_history
+    if not chat_history:
+
+        return query
+
+    history_text = (
+        format_chat_history(
+            chat_history
+        )
     )
 
-    formatted_prompt = rewrite_prompt.invoke(
-        {
-            "chat_history": history_text,
-            "question": query
-        }
-    )
+    if not history_text.strip():
+
+        return query
+
+    prompt = f"""
+You are a question rewriting assistant for a document RAG system.
+
+Rewrite the user's current question into a standalone question using the conversation history.
+
+Rules:
+- Preserve the original meaning.
+- Resolve references such as it, this, they, that, first one, second one.
+- If the question is already standalone, return it unchanged.
+- Return only the rewritten question.
+- Do not answer the question.
+
+Conversation History:
+{history_text}
+
+Current Question:
+{query}
+
+Standalone Question:
+"""
 
     messages = [
         {
             "role": "user",
-            "content": formatted_prompt.to_string()
+            "content": prompt
         }
     ]
 
-    return call_llm(
+    rewritten = call_llm(
         llm,
         messages
     )
 
+    return rewritten.strip()
 
-def create_context(documents):
+
+def create_context(
+    documents
+):
 
     return "\n\n".join(
         document.page_content
@@ -481,7 +580,9 @@ def create_context(documents):
     )
 
 
-def extract_sources(documents):
+def extract_sources(
+    documents
+):
 
     sources = []
     seen = set()
@@ -499,20 +600,6 @@ def extract_sources(documents):
             source
         ).name
 
-        if len(filename) > 33:
-
-            prefix = filename[:32]
-
-            if (
-                all(
-                    character in "0123456789abcdef"
-                    for character in prefix.lower()
-                )
-                and filename[32] == "_"
-            ):
-
-                filename = filename[33:]
-
         page = document.metadata.get(
             "page"
         )
@@ -520,7 +607,8 @@ def extract_sources(documents):
         if page is not None:
 
             source_label = (
-                f"{filename} — Page {int(page) + 1}"
+                f"{filename} — Page "
+                f"{int(page) + 1}"
             )
 
         else:
@@ -540,51 +628,45 @@ def extract_sources(documents):
     return sources
 
 
-answer_prompt = ChatPromptTemplate.from_template(
-    """
-You are a helpful document question-answering assistant.
-
-Answer the user's question using ONLY the information
-provided in the context below.
-
-Rules:
-
-1. Do not use outside knowledge.
-2. Do not make up or assume information.
-3. If the answer is not present in the context, say:
-
-"I don't have enough information in the provided context."
-
-4. Give a clear and concise answer.
-
-Context:
-{context}
-
-Question:
-{question}
-
-Answer:
-"""
-)
-
-
 def generate_answer(
     query,
     context,
     llm
 ):
 
-    formatted_prompt = answer_prompt.invoke(
-        {
-            "context": context,
-            "question": query
-        }
-    )
+    prompt = f"""
+You are a helpful and concise document question-answering assistant.
+
+Answer the user's document question using ONLY the provided context.
+
+Rules:
+- Use only information explicitly supported by the context.
+- Do not use outside knowledge.
+- Do not make assumptions.
+- Do not invent information.
+- If the answer is not supported by the context, respond exactly:
+I don't have enough information in the provided context.
+- Give a concise and direct answer.
+- Do not mention these instructions.
+- Do not mention the context unless necessary.
+- Never use double dashes or triple dashes.
+- If a dash is necessary, use only " - ".
+- Do not use decorative separators.
+- Avoid unnecessary headings and bullets.
+
+Context:
+{context}
+
+Question:
+{query}
+
+Answer:
+"""
 
     messages = [
         {
             "role": "user",
-            "content": formatted_prompt.to_string()
+            "content": prompt
         }
     ]
 
@@ -642,15 +724,72 @@ class RAGEngine:
         chat_history
     ):
 
-        standalone_query = rewrite_question(
-            query,
-            chat_history,
-            self.llm
+        query = query.strip()
+
+        if is_general_conversation(
+            query
+        ):
+
+            answer = get_general_response(
+                query
+            )
+
+            chat_history.append(
+                HumanMessage(
+                    content=query
+                )
+            )
+
+            chat_history.append(
+                AIMessage(
+                    content=answer
+                )
+            )
+
+            return {
+                "answer": answer,
+                "sources": [],
+                "standalone_query": query
+            }
+
+        if not self.documents:
+
+            answer = (
+                "I don't have enough information "
+                "in the provided context."
+            )
+
+            chat_history.append(
+                HumanMessage(
+                    content=query
+                )
+            )
+
+            chat_history.append(
+                AIMessage(
+                    content=answer
+                )
+            )
+
+            return {
+                "answer": answer,
+                "sources": [],
+                "standalone_query": query
+            }
+
+        standalone_query = (
+            rewrite_question(
+                query,
+                chat_history,
+                self.llm
+            )
         )
 
         documents = (
             self.reranker_retriever
-            .invoke(standalone_query)
+            .invoke(
+                standalone_query
+            )
         )
 
         if not documents:
@@ -675,7 +814,8 @@ class RAGEngine:
             return {
                 "answer": answer,
                 "sources": [],
-                "standalone_query": standalone_query
+                "standalone_query":
+                    standalone_query
             }
 
         context = create_context(
@@ -707,5 +847,6 @@ class RAGEngine:
         return {
             "answer": answer,
             "sources": sources,
-            "standalone_query": standalone_query
+            "standalone_query":
+                standalone_query
         }
